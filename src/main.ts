@@ -87,7 +87,7 @@ function paintRoster() {
     btn.className = 'card'
     btn.type = 'button'
     btn.dataset.id = def.id
-    btn.innerHTML = `<canvas width="220" height="150"></canvas><div class="meta"><span class="nm"></span><span class="sp"></span></div>`
+    btn.innerHTML = `<canvas width="240" height="200"></canvas><div class="meta"><span class="nm"></span><span class="sp"></span></div>`
     btn.querySelector('.nm')!.textContent = def.name
     btn.querySelector('.sp')!.textContent = def.special
     btn.addEventListener('click', () => {
