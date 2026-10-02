@@ -2,7 +2,9 @@
 
 A browser arcade fighter. Twelve stylized toons, one neon ring, first to two rounds. Built as affectionate satire of public AI figures — original title treatment, original announcer lines, no studio logos, no photos.
 
-Play it locally with `npm install` and `npm run dev`.
+Play the live build: [token-kombat-ai.vercel.app](https://token-kombat-ai.vercel.app)
+
+Or run it locally with `npm install` and `npm run dev`.
 
 ## Controls
 
