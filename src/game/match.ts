@@ -3,6 +3,7 @@ import { getFighter } from './roster'
 import {
   emptyPad,
   type Fighter,
+  type HitTier,
   type Match,
   type Mode,
   type Pad,
@@ -38,13 +39,21 @@ interface Strike {
 }
 
 const STRIKES: Record<string, Strike> = {
-  punch: { startup: 5, active: 4, recovery: 10, damage: 7, hitstun: 16, knockback: 4.6, lift: 0, reach: 58, y: 90, h: 22, chip: 0.16 },
-  kick: { startup: 8, active: 4, recovery: 12, damage: 11, hitstun: 20, knockback: 7.2, lift: -1.2, reach: 76, y: 70, h: 24, chip: 0.16 },
-  cpunch: { startup: 5, active: 4, recovery: 10, damage: 6, hitstun: 15, knockback: 3.6, lift: 0, reach: 56, y: 40, h: 20, chip: 0.16 },
-  ckick: { startup: 7, active: 5, recovery: 13, damage: 9, hitstun: 18, knockback: 8, lift: 0, reach: 90, y: 28, h: 18, chip: 0.16 },
-  apunch: { startup: 4, active: 5, recovery: 8, damage: 7, hitstun: 15, knockback: 4, lift: -3.2, reach: 56, y: 78, h: 22, chip: 0.2 },
-  akick: { startup: 6, active: 5, recovery: 10, damage: 10, hitstun: 18, knockback: 6, lift: -6.2, reach: 72, y: 56, h: 24, chip: 0.2 },
+  punch: { startup: 5, active: 3, recovery: 12, damage: 7, hitstun: 16, knockback: 4.6, lift: 0, reach: 58, y: 90, h: 22, chip: 0.16 },
+  kick: { startup: 8, active: 3, recovery: 14, damage: 11, hitstun: 20, knockback: 7.2, lift: -1.2, reach: 76, y: 70, h: 24, chip: 0.16 },
+  cpunch: { startup: 5, active: 3, recovery: 11, damage: 6, hitstun: 15, knockback: 3.6, lift: 0, reach: 56, y: 40, h: 20, chip: 0.16 },
+  ckick: { startup: 7, active: 4, recovery: 14, damage: 9, hitstun: 18, knockback: 8, lift: 0, reach: 90, y: 28, h: 18, chip: 0.16 },
+  apunch: { startup: 4, active: 4, recovery: 9, damage: 7, hitstun: 15, knockback: 4, lift: -3.2, reach: 56, y: 78, h: 22, chip: 0.2 },
+  akick: { startup: 6, active: 4, recovery: 11, damage: 10, hitstun: 18, knockback: 6, lift: -6.2, reach: 72, y: 56, h: 24, chip: 0.2 },
 }
+
+/** Altman's standing kit. Windows line up with the windup / snap / recover pose. */
+const ALTMAN: Record<string, Strike> = {
+  punch: { startup: 4, active: 3, recovery: 11, damage: 6, hitstun: 17, knockback: 3.5, lift: 0, reach: 64, y: 92, h: 24, chip: 0.16 },
+  kick: { startup: 8, active: 3, recovery: 16, damage: 11, hitstun: 24, knockback: 6.8, lift: -1.6, reach: 84, y: 66, h: 26, chip: 0.18 },
+}
+
+const HIT_STOP: Record<HitTier, number> = { light: 2, mid: 4, heavy: 6 }
 
 const SPECIAL_END: Record<string, number> = {
   altman: 36,
@@ -95,6 +104,17 @@ export function createMatch(p1Id: string, p2Id: string, mode: Mode, seed = 1): M
     koFlash: 0,
     winner: null,
     fxCount: 0,
+    zoomKick: 0,
+    panKick: 0,
+    kickX: 0,
+    kickY: 0,
+    impact: 0,
+    impactTier: 0,
+    impactX: 0,
+    impactY: 0,
+    lastAdv: 0,
+    lastAdvT: 0,
+    koHold: null,
   }
   startRound(m)
   return m
@@ -105,6 +125,7 @@ export function stepMatch(m: Match, pads: [Pad, Pad]) {
   if (m.hitstop > 0 && m.phase === 'fight') {
     m.hitstop--
     decayFx(m, true)
+    if (m.hitstop === 0 && m.koHold !== null) endRound(m, m.koHold)
     return
   }
 
@@ -160,6 +181,12 @@ function startRound(m: Match) {
   m.phaseTimer = 100
   m.timer = 99 * 60
   m.hitstop = 0
+  m.koHold = null
+  m.zoomKick = 0
+  m.panKick = 0
+  m.kickX = 0
+  m.kickY = 0
+  m.impact = 0
   m.projectiles = []
   m.zones = []
   m.clones = []
@@ -224,6 +251,7 @@ function resetBody(f: Fighter, x: number, facing: 1 | -1, first: boolean) {
   f.strikeAir = false
   f.strikeLow = false
   f.damageTaken = 0
+  f.recoil = 0
 }
 
 function makeFighter(id: string, player: 0 | 1, x: number): Fighter {
@@ -268,6 +296,7 @@ function makeFighter(id: string, player: 0 | 1, x: number): Fighter {
     strikeAir: false,
     strikeLow: false,
     damageTaken: 0,
+    recoil: 0,
   }
 }
 
@@ -352,6 +381,7 @@ function updateFighter(m: Match, f: Fighter, pad: Pad) {
   if (f.slow > 0) f.slow--
   if (f.armor > 0) f.armor--
   if (f.flash > 0) f.flash--
+  if (f.recoil > 0) f.recoil--
   if (f.chainTimer > 0) {
     f.chainTimer--
     if (f.chainTimer === 0) f.chain = 0
@@ -527,12 +557,23 @@ function startStrike(m: Match, f: Fighter, kind: 'punch' | 'kick') {
 }
 
 function strikeSpec(f: Fighter): Strike {
-  if (f.strikeAir) return STRIKES[f.strike === 'kick' ? 'akick' : 'apunch']
-  if (f.strikeLow) return STRIKES[f.strike === 'kick' ? 'ckick' : 'cpunch']
-  return STRIKES[f.strike === 'kick' ? 'kick' : 'punch']
+  const key = f.strikeAir
+    ? f.strike === 'kick'
+      ? 'akick'
+      : 'apunch'
+    : f.strikeLow
+      ? f.strike === 'kick'
+        ? 'ckick'
+        : 'cpunch'
+      : f.strike === 'kick'
+        ? 'kick'
+        : 'punch'
+  if (f.def.id === 'altman' && ALTMAN[key]) return ALTMAN[key]
+  return STRIKES[key]
 }
 
 function tickStrike(m: Match, f: Fighter) {
+  if (tryAltmanCancel(m, f)) return
   const s = strikeSpec(f)
   const total = s.startup + s.active + s.recovery
   if (f.stateFrame > s.startup && f.stateFrame <= s.startup + s.active) queueMelee(m, f, s, 'strike')
@@ -540,6 +581,98 @@ function tickStrike(m: Match, f: Fighter) {
     f.state = f.grounded ? 'idle' : 'fall'
     f.strike = null
   }
+}
+
+/** Hit-confirm only. Punch links into kick or special; kick links into special. Whiff keeps the recovery. */
+function tryAltmanCancel(m: Match, f: Fighter): boolean {
+  if (f.def.id !== 'altman' || !f.didHit || !f.grounded || f.strikeAir || f.strikeLow) return false
+  if (f.strike !== 'punch' && f.strike !== 'kick') return false
+  const s = strikeSpec(f)
+  const activeEnd = s.startup + s.active
+  const cancelEnd = activeEnd + Math.max(3, Math.round(s.recovery * 0.34))
+  if (f.stateFrame < s.startup + 1 || f.stateFrame > cancelEnd) return false
+  const next = f.buf?.k
+  if (f.strike === 'punch' && next === 'kick') {
+    f.buf = null
+    startStrike(m, f, 'kick')
+    m.callout = 'LINKED'
+    m.calloutT = 22
+    return true
+  }
+  if ((f.strike === 'punch' || f.strike === 'kick') && next === 'special' && f.meter >= meterNeed(f)) {
+    f.buf = null
+    beginSpecial(m, f)
+    return true
+  }
+  return false
+}
+
+export interface AttackRead {
+  name: string
+  startup: number
+  active: number
+  recovery: number
+  now: number
+  phase: 'STARTUP' | 'ACTIVE' | 'RECOVERY'
+  cancel: boolean
+}
+
+const SPECIAL_HIT: Record<string, { startup: number; active: number; name: string }> = {
+  altman: { startup: 9, active: 6, name: 'SOFTMAX' },
+  elon: { startup: 10, active: 8, name: 'ROCKET' },
+  jensen: { startup: 14, active: 16, name: 'BEAM' },
+  demis: { startup: 8, active: 6, name: 'REWIND' },
+  dario: { startup: 3, active: 24, name: 'CLAUSE' },
+  mira: { startup: 6, active: 18, name: 'MIRAGE' },
+  ilya: { startup: 4, active: 13, name: 'CHARGE' },
+  zuck: { startup: 8, active: 28, name: 'FEED' },
+  satya: { startup: 8, active: 20, name: 'COPILOT' },
+  feifei: { startup: 8, active: 8, name: 'SNARE' },
+  lecun: { startup: 10, active: 8, name: 'CAKE' },
+  karpathy: { startup: 16, active: 18, name: 'SPIRAL' },
+}
+
+export function attackRead(f: Fighter): AttackRead | null {
+  if (f.state !== 'punch' && f.state !== 'kick' && f.state !== 'special') return null
+  if (f.state === 'special') {
+    const spec = SPECIAL_HIT[f.def.id]
+    const total = SPECIAL_END[f.def.id] ?? 36
+    const startup = spec?.startup ?? 8
+    const active = spec?.active ?? 6
+    const recovery = Math.max(1, total - startup - active)
+    return {
+      name: spec?.name ?? 'SPECIAL',
+      startup,
+      active,
+      recovery,
+      now: f.stateFrame,
+      phase: f.stateFrame <= startup ? 'STARTUP' : f.stateFrame <= startup + active ? 'ACTIVE' : 'RECOVERY',
+      cancel: false,
+    }
+  }
+  const s = strikeSpec(f)
+  const standing = f.def.id === 'altman' && !f.strikeAir && !f.strikeLow
+  const name = standing
+    ? f.strike === 'kick'
+      ? 'MEDIUM KICK'
+      : 'LIGHT PUNCH'
+    : f.strikeAir
+      ? f.strike === 'kick'
+        ? 'AIR KICK'
+        : 'AIR PUNCH'
+      : f.strikeLow
+        ? f.strike === 'kick'
+          ? 'LOW KICK'
+          : 'LOW PUNCH'
+        : f.strike === 'kick'
+          ? 'KICK'
+          : 'PUNCH'
+  const activeEnd = s.startup + s.active
+  const cancelEnd = activeEnd + Math.max(3, Math.round(s.recovery * 0.34))
+  const cancel =
+    standing && f.didHit && f.grounded && f.stateFrame >= s.startup + 1 && f.stateFrame <= cancelEnd
+  const phase = f.stateFrame <= s.startup ? 'STARTUP' : f.stateFrame <= activeEnd ? 'ACTIVE' : 'RECOVERY'
+  return { name, startup: s.startup, active: s.active, recovery: s.recovery, now: f.stateFrame, phase, cancel }
 }
 
 function beginSpecial(m: Match, f: Fighter) {
@@ -961,6 +1094,7 @@ function queueMelee(m: Match, f: Fighter, spec: Strike, kind: string, keepGrab =
     sourceY: f.y - spec.y,
     kind,
     root: 0,
+    tier: tierFromDamage(spec.damage),
   })
 }
 
@@ -1018,6 +1152,7 @@ function updateClones(m: Match) {
       sourceY: c.y - 70,
       kind: 'clone',
       root: 0,
+      tier: tierFromDamage(8),
     })
   }
 }
@@ -1072,6 +1207,7 @@ function updateProjectiles(m: Match) {
       sourceY: p.y,
       kind: p.kind,
       root: 0,
+      tier: tierFromDamage(p.damage),
     })
   }
 }
@@ -1129,6 +1265,7 @@ function zoneHit(z: Zone, target: 0 | 1, damage: number, hitstun: number, knockb
     sourceY: GROUND,
     kind: z.kind,
     root: 0,
+    tier: tierFromDamage(damage),
   }
 }
 
@@ -1187,7 +1324,6 @@ function resolveHit(m: Match, hit: Pending) {
   dmg = Math.max(blocking ? 1 : 0, Math.round(dmg))
   target.hp = clamp(target.hp - dmg, 0, 100)
   target.damageTaken += dmg
-  target.flash = 5
   attacker.meter = clamp(attacker.meter + 7 + dmg * 0.25, 0, 100)
   target.meter = clamp(target.meter + 4, 0, 100)
   if (!blocking) {
@@ -1195,11 +1331,16 @@ function resolveHit(m: Match, hit: Pending) {
     else attacker.chain = 1
     attacker.chainTimer = 32
   }
-  m.shake = Math.min(18, m.shake + 3 + dmg * 0.35)
-  m.hitstop = Math.min(7, 2 + Math.floor(dmg / 7))
-  m.sfx.push(blocking ? 'block' : 'hit')
-  spark(m, (target.x + hit.sourceX) / 2, hit.sourceY, blocking ? '#f4f1ea' : attacker.def.accent, blocking ? 'GUARD' : `-${dmg}`)
-  burst(m, target.x, hit.sourceY, attacker.def.accent, blocking ? 4 : 8)
+  const tier = target.hp <= 0 ? 'heavy' : hit.tier
+  const stop = blocking ? 2 : HIT_STOP[tier]
+  m.hitstop = Math.max(m.hitstop, stop)
+  m.sfx.push(blocking ? 'block' : `hit-${tier}`)
+  const contactX = (target.x + hit.sourceX) / 2
+  const contactY = hit.sourceY
+  feelConnect(m, contactX, contactY, blocking ? '#f4f1ea' : attacker.def.accent, tier, blocking)
+  spark(m, contactX, contactY - 28, blocking ? '#f4f1ea' : '#fff6df', blocking ? 'GUARD' : `-${dmg}`)
+  target.recoil = blocking ? 4 : tier === 'heavy' ? 12 : tier === 'mid' ? 9 : 6
+  target.flash = blocking ? 4 : tier === 'heavy' ? 12 : tier === 'mid' ? 9 : 6
 
   if (hit.kind === 'rocket') {
     m.bubble = { x: target.x, y: target.y - 150, text: ROASTS[Math.floor(rand(m) * ROASTS.length)], life: 64 }
@@ -1214,21 +1355,27 @@ function resolveHit(m: Match, hit: Pending) {
     target.vx = (Math.sign(target.x - hit.sourceX) || 1) * 3
     m.koFlash = 16
     burst(m, target.x, target.y - 60, '#e7ff52', 18)
+    noteAdv(m, attacker, target.hitstun)
     return
   }
 
-  if (hit.keepGrab) return
+  if (hit.keepGrab) {
+    noteAdv(m, attacker, target.hitstun)
+    return
+  }
 
   if (blocking) {
     target.blockstun = Math.max(target.blockstun, Math.round(hit.hitstun * 0.42))
     const dir = Math.sign(target.x - hit.sourceX) || -target.facing
     target.vx = dir * Math.min(3.5, hit.knockback * 0.35)
+    noteAdv(m, attacker, target.blockstun)
     return
   }
 
   if (target.armor > 0) {
     const dir = Math.sign(target.x - hit.sourceX) || -target.facing
     target.vx = dir * 1.5
+    noteAdv(m, attacker, 0)
     return
   }
 
@@ -1245,6 +1392,7 @@ function resolveHit(m: Match, hit: Pending) {
     target.hitstun = hit.hitstun
     target.crouching = false
   }
+  noteAdv(m, attacker, target.hitstun)
 }
 
 function separate(m: Match) {
@@ -1270,12 +1418,14 @@ function checkRound(m: Match) {
   if (m.phase !== 'fight') return
   const dead0 = m.fighters[0].hp <= 0
   const dead1 = m.fighters[1].hp <= 0
-  if (dead0 && !dead1) endRound(m, 1)
-  else if (dead1 && !dead0) endRound(m, 0)
-  else if (dead0 && dead1) {
-    const w: 0 | 1 = m.fighters[0].damageTaken <= m.fighters[1].damageTaken ? 0 : 1
-    endRound(m, w)
-  } else if (m.timer <= 0) {
+  if (dead0 || dead1) {
+    const w: 0 | 1 =
+      dead0 && !dead1 ? 1 : dead1 && !dead0 ? 0 : m.fighters[0].damageTaken <= m.fighters[1].damageTaken ? 0 : 1
+    m.koHold = w
+    m.hitstop = Math.max(m.hitstop, HIT_STOP.heavy)
+    return
+  }
+  if (m.timer <= 0) {
     const h0 = m.fighters[0].hp
     const h1 = m.fighters[1].hp
     let w: 0 | 1 = h0 === h1 ? (m.fighters[0].meter >= m.fighters[1].meter ? 0 : 1) : h0 > h1 ? 0 : 1
@@ -1286,6 +1436,7 @@ function checkRound(m: Match) {
 
 function endRound(m: Match, winner: 0 | 1) {
   if (m.phase !== 'fight') return
+  m.koHold = null
   const champ = m.fighters[winner]
   const loser = m.fighters[1 - winner]
   champ.wins += 1
@@ -1319,6 +1470,109 @@ function endRound(m: Match, winner: 0 | 1) {
   burst(m, champ.x, champ.y - 80, champ.def.accent, 16)
 }
 
+function tierFromDamage(damage: number): HitTier {
+  if (damage >= 15) return 'heavy'
+  if (damage >= 9) return 'mid'
+  return 'light'
+}
+
+function tierIndex(tier: HitTier): 0 | 1 | 2 {
+  return tier === 'heavy' ? 2 : tier === 'mid' ? 1 : 0
+}
+
+function attackerRemain(f: Fighter): number {
+  if (f.state === 'punch' || f.state === 'kick') {
+    const s = strikeSpec(f)
+    return Math.max(0, s.startup + s.active + s.recovery - f.stateFrame)
+  }
+  if (f.state === 'special') {
+    const total = SPECIAL_END[f.def.id] ?? 36
+    return Math.max(0, total - f.stateFrame)
+  }
+  return 0
+}
+
+function noteAdv(m: Match, attacker: Fighter, stun: number) {
+  m.lastAdv = stun - attackerRemain(attacker)
+  m.lastAdvT = 90
+}
+
+function feelConnect(m: Match, x: number, y: number, color: string, tier: HitTier, blocked: boolean) {
+  const i = tierIndex(tier)
+  const scale = blocked ? 0.45 : 1
+  const mid = (m.fighters[0].x + m.fighters[1].x) / 2
+  const dir = Math.sign(x - mid) || 1
+  m.zoomKick = Math.max(m.zoomKick, [0.06, 0.12, 0.2][i] * scale)
+  m.panKick = dir * [22, 40, 62][i] * scale
+  m.kickX = dir * [7, 12, 18][i] * scale
+  m.kickY = [3, 6, 9][i] * scale
+  m.impact = 1
+  m.impactTier = blocked ? 0 : i
+  m.impactX = x
+  m.impactY = y
+  m.shake = Math.max(m.shake, [5, 9, 14][i] * (blocked ? 0.5 : 1))
+  const count = blocked ? 6 : [9, 14, 20][i]
+  const life = [14, 20, 28][i]
+  for (let k = 0; k < count; k++) {
+    const a = (Math.PI * 2 * k) / count
+    const sp = (blocked ? 2 : [3.4, 5, 7][i]) + (k % 3) * 0.6
+    const kind = k % 5 === 0 ? 'streak' : k % 2 === 0 ? 'shard' : 'dot'
+    m.sparks.push({
+      x,
+      y,
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp - 1.6,
+      life,
+      max: life,
+      color: k % 3 === 0 ? '#fff' : color,
+      size: [4, 6, 9][i],
+      rot: a,
+      kind,
+    })
+  }
+  if (!blocked && i > 0) {
+    m.sparks.push({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      life: 12 + i * 6,
+      max: 12 + i * 6,
+      color,
+      size: 16 + i * 14,
+      rot: 0,
+      kind: 'ring',
+    })
+    if (i === 2) {
+      m.sparks.push({
+        x,
+        y,
+        vx: 0,
+        vy: 0,
+        life: 18,
+        max: 18,
+        color: '#fff6df',
+        size: 46,
+        rot: 0,
+        kind: 'ring',
+      })
+    }
+  }
+  m.sparks.push({
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    life: 8 + i * 4,
+    max: 8 + i * 4,
+    color,
+    size: [26, 42, 68][i],
+    rot: 0,
+    kind: 'flash',
+  })
+  if (m.sparks.length > 180) m.sparks.splice(0, m.sparks.length - 180)
+}
+
 function burst(m: Match, x: number, y: number, color: string, n: number) {
   for (let i = 0; i < n; i++) {
     const a = (Math.PI * 2 * i) / n
@@ -1332,6 +1586,7 @@ function burst(m: Match, x: number, y: number, color: string, n: number) {
       max: 22,
       color,
       size: 3 + (i % 3),
+      rot: a,
       kind: i % 5 === 0 ? 'ring' : 'dot',
     })
   }
@@ -1344,35 +1599,44 @@ function spark(m: Match, x: number, y: number, color: string, text: string) {
     y,
     vx: 0,
     vy: -1.4,
-    life: 32,
-    max: 32,
+    life: 36,
+    max: 36,
     color,
-    size: 16,
+    size: 18,
     text,
+    rot: 0,
     kind: 'text',
   })
 }
 
 function decayFx(m: Match, freeze: boolean) {
-  m.frame++
+  const hold = freeze || m.hitstop > 0
+  if (!freeze) m.frame++
+  if (hold) return
   m.shake *= 0.82
   if (m.shake < 0.25) m.shake = 0
+  m.zoomKick *= 0.84
+  m.panKick *= 0.84
+  m.kickX *= 0.78
+  m.kickY *= 0.78
+  m.impact *= 0.72
+  if (m.zoomKick < 0.004) m.zoomKick = 0
+  if (Math.abs(m.panKick) < 0.4) m.panKick = 0
   if (m.calloutT > 0) m.calloutT--
+  if (m.lastAdvT > 0) m.lastAdvT--
   if (m.koFlash > 0) m.koFlash--
   if (m.bubble) {
     m.bubble.life--
     m.bubble.y -= 0.25
     if (m.bubble.life <= 0) m.bubble = null
   }
-  if (!freeze) {
-    for (const s of m.sparks) {
+  for (const s of m.sparks) {
+    if (s.kind !== 'flash' && s.kind !== 'ring') {
       s.x += s.vx
       s.y += s.vy
       s.vy += s.kind === 'text' ? 0 : 0.18
-      s.life--
     }
-  } else {
-    for (const s of m.sparks) s.life--
+    s.life--
   }
   m.sparks = m.sparks.filter((s) => s.life > 0)
   for (const g of m.ghosts) g.life--

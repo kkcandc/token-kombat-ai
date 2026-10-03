@@ -19,12 +19,15 @@ Or run it locally with `npm install` and `npm run dev`.
 | Block | I or Left Shift | . (period) or Right Shift |
 | Pause | Esc | Esc |
 | Mute | M | M |
+| Frame data | F3 or Frames | F3 or Frames |
 
 On a phone, on-screen buttons cover punch, kick, special, block, and movement for player 1.
 
 Crouch slips under high punches and the CUDA beam. Block faces the hit and turns it into chip. Jump is the other way over a beam. Specials spend meter. Meter builds when you land hits, take hits, and just by staying in the round.
 
 Rounds are first to two. A 99-count clock decides a round that runs long: higher health wins, and the booth calls it a loss curve.
+
+Hits are stepped at 60 sim frames a second. A clean connect freezes the round for 2, 4, or 6 frames (light, medium, heavy), kicks the side-on camera in, and lets it settle back to a readable two-shot. Frame data (F3) shows startup, active, recovery, and the advantage of the last hit. Altman's standing punch is the light, his standing kick is the medium: the limb chambers, snaps on the active frames, and recovers. A punch that lands can link into kick or special during the cancel window. A whiff does not.
 
 ## How a bout starts
 
