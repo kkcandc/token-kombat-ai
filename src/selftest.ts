@@ -189,6 +189,89 @@ for (const def of ROSTER) {
   for (const word of bad) assert(!blob.includes(word), `banned phrase present: ${word}`)
 }
 
+{
+  const m = createMatch('altman', 'jensen', 'local', 21)
+  toFight(m)
+  place(m, 800, 860)
+  let steps = 0
+  while (m.fighters[1].hp === 100 && steps < 24) {
+    const pad = emptyPad()
+    pad.punch = true
+    pad.punchPressed = steps === 0
+    stepMatch(m, [pad, emptyPad()])
+    steps++
+  }
+  assert(m.fighters[1].hp < 100, 'altman light should connect')
+  assert(m.hitstop === 2, `light hitstop ${m.hitstop}`)
+  assert(m.zoomKick > 0.04, 'camera kick on light')
+  assert(m.sparks.some((s) => s.kind === 'flash' || s.kind === 'streak' || s.kind === 'shard'), 'light sparks')
+  const heldFrame = m.frame
+  const heldPose = m.fighters[0].stateFrame
+  const heldX = m.fighters[1].x
+  stepMatch(m, [emptyPad(), emptyPad()])
+  assert(m.frame === heldFrame, 'hitstop should freeze the sim clock')
+  assert(m.fighters[0].stateFrame === heldPose, 'hitstop should freeze the attacker')
+  assert(m.fighters[1].x === heldX, 'hitstop should freeze the victim')
+  while (m.hitstop > 0) stepMatch(m, [emptyPad(), emptyPad()])
+  const kick = emptyPad()
+  kick.kick = true
+  kick.kickPressed = true
+  stepMatch(m, [kick, emptyPad()])
+  assert(m.fighters[0].state === 'kick', `hit confirm should link into kick, state ${m.fighters[0].state}`)
+  assert(m.lastAdv > 0, `light punch should be plus, adv ${m.lastAdv}`)
+}
+
+{
+  const m = createMatch('altman', 'jensen', 'local', 22)
+  toFight(m)
+  place(m, 800, 1500)
+  const pad = emptyPad()
+  pad.punchPressed = true
+  stepMatch(m, [pad, emptyPad()])
+  for (let i = 0; i < 5; i++) stepMatch(m, [emptyPad(), emptyPad()])
+  const kick = emptyPad()
+  kick.kickPressed = true
+  stepMatch(m, [kick, emptyPad()])
+  assert(m.fighters[0].state === 'punch', `whiff should keep recovery, state ${m.fighters[0].state} f${m.fighters[0].stateFrame}`)
+  assert(m.fighters[1].hp === 100, 'whiff punch connected from too far')
+}
+
+{
+  const m = createMatch('altman', 'jensen', 'local', 23)
+  toFight(m)
+  place(m, 800, 850)
+  let steps = 0
+  while (m.fighters[1].hp === 100 && steps < 30) {
+    const pad = emptyPad()
+    pad.kick = true
+    pad.kickPressed = steps === 0
+    stepMatch(m, [pad, emptyPad()])
+    steps++
+  }
+  assert(m.hitstop === 4, `medium hitstop ${m.hitstop}`)
+  assert(m.impactTier === 1, `medium flash tier ${m.impactTier}`)
+}
+
+{
+  const m = createMatch('jensen', 'mira', 'local', 24)
+  toFight(m)
+  place(m, 700, 860)
+  m.fighters[0].meter = 100
+  m.fighters[0].invuln = 0
+  m.fighters[1].invuln = 0
+  const pad = emptyPad()
+  pad.specialPressed = true
+  stepMatch(m, [pad, emptyPad()])
+  let stop = 0
+  for (let i = 0; i < 40 && stop === 0; i++) {
+    const before = m.fighters[1].hp
+    if (m.phase === 'fight') place(m, 700, 860)
+    stepMatch(m, [emptyPad(), emptyPad()])
+    if (m.fighters[1].hp < before) stop = m.hitstop
+  }
+  assert(stop === 6, `heavy hitstop ${stop}`)
+}
+
 if (failures.length) {
   console.error(failures.join('\n'))
   throw new Error(`${failures.length} failed`)

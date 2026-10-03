@@ -115,6 +115,7 @@ h1 .kombat {
   font-size: 14px;
 }
 .btn.primary { background: var(--lime); color: #1a120c; border-color: var(--lime); }
+.btn.tiny.primary { background: var(--lime); color: #1a120c; border-color: var(--lime); }
 .btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn.ghost { background: transparent; }
 .btn.tiny { padding: 8px 10px; font-size: 12px; }

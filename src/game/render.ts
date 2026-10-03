@@ -1,4 +1,5 @@
 import { GROUND, VH, VW, clamp } from './constants'
+import { attackRead } from './match'
 import type { FighterDef } from './roster'
 import { getFighter } from './roster'
 import type { Fighter, Match, Projectile, Spark, State } from './types'
@@ -18,19 +19,22 @@ interface Actor {
   shield: number
   facing: 1 | -1
   alpha: number
+  recoil: number
+  startup: number
+  active: number
+  recovery: number
 }
 
 type Pt = [number, number]
 
 const GROUND_SCREEN = 590
 
-export function renderMatch(ctx: CanvasRenderingContext2D, m: Match, reduceMotion = false) {
+export function renderMatch(ctx: CanvasRenderingContext2D, m: Match, reduceMotion = false, showFrames = false) {
   ctx.clearRect(0, 0, VW, VH)
   drawBackdrop(ctx, m)
   ctx.save()
-  const mag = reduceMotion ? 0 : m.shake * 1.35
-  ctx.translate(Math.sin(m.frame * 1.9) * mag, Math.cos(m.frame * 2.4) * mag * 0.65)
-  const cam = cameraFor(m)
+  if (!reduceMotion) ctx.translate(m.kickX, m.kickY)
+  const cam = cameraFor(m, reduceMotion)
   drawFloor(ctx, m, cam)
   for (const z of m.zones) drawZone(ctx, z, cam, m.frame)
   for (const g of m.ghosts) drawGhost(ctx, g, cam)
@@ -48,6 +52,10 @@ export function renderMatch(ctx: CanvasRenderingContext2D, m: Match, reduceMotio
       shield: 0,
       facing: c.facing,
       alpha: 0.55,
+      recoil: 0,
+      startup: 5,
+      active: 3,
+      recovery: 10,
     })
   }
   const ordered = [...m.fighters].sort((a, b) => a.y - b.y)
@@ -55,15 +63,18 @@ export function renderMatch(ctx: CanvasRenderingContext2D, m: Match, reduceMotio
   drawReflections(ctx, cam, m)
   for (const p of m.projectiles) if (p.delay <= 0) drawProjectile(ctx, p, cam, m.frame)
   for (const s of m.sparks) drawSpark(ctx, s, cam)
+  if (m.impact > 0.04 && !reduceMotion) drawImpact(ctx, m, cam)
   if (m.bubble) drawBubble(ctx, m.bubble.x, m.bubble.y, m.bubble.text, m.bubble.life, cam)
-  if (m.shake > 5 && !reduceMotion) drawSpeedLines(ctx, m)
+  if (m.shake > 8 && !reduceMotion) drawSpeedLines(ctx, m)
   ctx.restore()
   drawHud(ctx, m)
+  if (showFrames) drawFrameHud(ctx, m)
   if (m.koFlash > 0) {
-    ctx.fillStyle = `rgba(255,248,230,${m.koFlash / 28})`
+    ctx.fillStyle = `rgba(255,248,230,${m.koFlash / 22})`
     ctx.fillRect(0, 0, VW, VH)
-  } else if (m.shake > 6 && !reduceMotion) {
-    ctx.fillStyle = `rgba(255,255,255,${Math.min(0.22, m.shake / 70)})`
+  } else if (m.impact > 0.05 && !reduceMotion) {
+    const wash = [0.1, 0.18, 0.34][m.impactTier] * m.impact
+    ctx.fillStyle = `rgba(255,244,226,${wash})`
     ctx.fillRect(0, 0, VW, VH)
   }
   vignette(ctx)
@@ -101,11 +112,16 @@ export function renderPortrait(ctx: CanvasRenderingContext2D, def: FighterDef, a
     shield: 0,
     facing: 1,
     alpha: 1,
+    recoil: 0,
+    startup: 0,
+    active: 0,
+    recovery: 0,
   })
   ctx.restore()
 }
 
 function actorFrom(f: Fighter): Actor {
+  const read = attackRead(f)
   return {
     def: f.def,
     state: f.state,
@@ -116,13 +132,18 @@ function actorFrom(f: Fighter): Actor {
     shield: f.shield,
     facing: f.facing,
     alpha: 1,
+    recoil: f.recoil,
+    startup: read?.startup ?? 0,
+    active: read?.active ?? 0,
+    recovery: read?.recovery ?? 0,
   }
 }
 
-function cameraFor(m: Match): Cam {
-  const mid = (m.fighters[0].x + m.fighters[1].x) / 2
+function cameraFor(m: Match, reduceMotion: boolean): Cam {
+  const mid = (m.fighters[0].x + m.fighters[1].x) / 2 + (reduceMotion ? 0 : m.panKick)
   const dist = Math.abs(m.fighters[0].x - m.fighters[1].x)
-  const zoom = clamp(1280 / (dist + 230), 0.86, 1.95)
+  const base = clamp(1080 / (dist + 460), 0.98, 1.22)
+  const zoom = reduceMotion ? base : clamp(base + m.zoomKick, 0.98, 1.46)
   return { mid, zoom }
 }
 
@@ -141,6 +162,17 @@ function drawBackdrop(ctx: CanvasRenderingContext2D, m: Match) {
   sky.addColorStop(1, '#070504')
   ctx.fillStyle = sky
   ctx.fillRect(0, 0, VW, VH)
+
+  const key = ctx.createRadialGradient(VW / 2, 120, 20, VW / 2, 420, 560)
+  key.addColorStop(0, 'rgba(255, 214, 170, 0.2)')
+  key.addColorStop(0.45, 'rgba(255, 78, 42, 0.07)')
+  key.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = key
+  ctx.fillRect(0, 0, VW, VH)
+  ctx.fillStyle = 'rgba(90, 140, 255, 0.05)'
+  ctx.fillRect(0, 0, 220, VH)
+  ctx.fillStyle = 'rgba(231, 255, 82, 0.04)'
+  ctx.fillRect(VW - 220, 0, 220, VH)
 
   ctx.save()
   ctx.globalCompositeOperation = 'lighter'
@@ -164,7 +196,6 @@ function drawBackdrop(ctx: CanvasRenderingContext2D, m: Match) {
 
   ctx.save()
   ctx.translate(980, 118)
-  ctx.rotate(m.frame / 80)
   ctx.strokeStyle = 'rgba(231,255,82,0.55)'
   ctx.lineWidth = 3
   ctx.beginPath()
@@ -282,8 +313,9 @@ function drawFloor(ctx: CanvasRenderingContext2D, m: Match, cam: Cam) {
   ctx.stroke()
   ctx.restore()
 
-  const gloss = ctx.createRadialGradient(VW / 2, 640, 20, VW / 2, 660, 420)
-  gloss.addColorStop(0, 'rgba(255,180,140,0.16)')
+  const gloss = ctx.createRadialGradient(VW / 2, 620, 10, VW / 2, 660, 480)
+  gloss.addColorStop(0, 'rgba(255, 186, 120, 0.28)')
+  gloss.addColorStop(0.45, 'rgba(255, 70, 40, 0.08)')
   gloss.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = gloss
   ctx.fillRect(0, 560, VW, 160)
@@ -329,8 +361,9 @@ function drawWorld(ctx: CanvasRenderingContext2D, cam: Cam, x: number, y: number
   ctx.save()
   ctx.translate(p.x, p.y)
   ctx.scale(facing * z, z)
-  if (actor.state === 'ko') ctx.rotate(-1.02)
-  else if (actor.state === 'hit' || actor.state === 'launch') ctx.rotate(-0.18)
+  if (actor.state === 'ko') ctx.rotate(-1.15)
+  else if (actor.state === 'hit' || actor.state === 'launch') ctx.rotate(-0.22 - actor.recoil * 0.012)
+  else if (actor.recoil > 0) ctx.rotate(-actor.recoil * 0.01)
   ctx.globalAlpha = actor.alpha
   drawLocal(ctx, actor)
   ctx.restore()
@@ -369,8 +402,10 @@ function drawLocal(ctx: CanvasRenderingContext2D, a: Actor) {
   drawArm(ctx, pose.frontShoulder, pose.frontHand, 14, sleeve, a.def.skin)
   drawHead(ctx, a, bulk)
   drawProp(ctx, a, pose)
-  if (a.state === 'punch' && a.stateFrame > 2 && a.stateFrame < 14) drawSlash(ctx, pose.frontHand, a.def.accent, 1.15)
-  if (a.state === 'kick' && a.stateFrame > 4 && a.stateFrame < 16) drawSlash(ctx, pose.frontFoot, '#fff6df', 1.45)
+  const striking = a.state === 'punch' || a.state === 'kick'
+  const live = striking && a.stateFrame > a.startup && a.stateFrame <= a.startup + a.active
+  if (a.state === 'punch' && live) drawSlash(ctx, pose.frontHand, a.def.accent, 1.15)
+  if (a.state === 'kick' && live) drawSlash(ctx, pose.frontFoot, '#fff6df', 1.45)
   if (a.state === 'special') drawAura(ctx, a)
   if (a.shield > 0) {
     ctx.strokeStyle = a.def.accent
@@ -384,12 +419,23 @@ function drawLocal(ctx: CanvasRenderingContext2D, a: Actor) {
     ctx.shadowBlur = 0
     ctx.globalAlpha = 1
   }
-  if (a.flash > 0) {
+  if (a.flash > 0 || a.state === 'hit' || a.state === 'launch') {
+    ctx.save()
     ctx.globalCompositeOperation = 'lighter'
-    ctx.fillStyle = `rgba(255,255,255,${Math.min(0.7, a.flash / 6)})`
+    const hot = a.flash > 0 ? Math.min(0.85, 0.28 + a.flash / 10) : 0.22
+    ctx.fillStyle = `rgba(255,255,255,${hot})`
     ctx.beginPath()
-    ctx.ellipse(0, -88, 46, 78, 0, 0, Math.PI * 2)
+    ctx.ellipse(0, -88, 48, 82, 0, 0, Math.PI * 2)
     ctx.fill()
+    ctx.globalAlpha = Math.min(0.9, hot + 0.2)
+    ctx.strokeStyle = a.def.accent
+    ctx.lineWidth = 5
+    ctx.shadowColor = a.def.accent
+    ctx.shadowBlur = 16
+    ctx.beginPath()
+    ctx.ellipse(0, -88, 50, 84, 0, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
   }
   ctx.restore()
 }
@@ -409,31 +455,63 @@ interface BodyPose {
   frontHand: Pt
 }
 
+function limbPhase(fr: number, startup: number, active: number, recovery: number) {
+  const su = Math.max(1, startup)
+  const act = Math.max(1, active)
+  const rec = Math.max(1, recovery)
+  if (fr <= su) return -0.42 * ease(fr / su)
+  if (fr <= su + act) {
+    const t = (fr - su) / act
+    return ease(Math.min(1, 0.78 + t * 0.22))
+  }
+  const t = (fr - su - act) / rec
+  return 1 - ease(Math.min(1, t))
+}
+
 function poseOf(a: Actor): BodyPose {
   const fr = a.stateFrame
-  const punch = a.state === 'punch' ? ease(fr / 6) : a.state === 'special' ? 0.9 : 0
-  const kick = a.state === 'kick' ? ease(Math.max(0, (fr - 2) / 7)) : 0
+  const softmax = a.def.id === 'altman' && a.state === 'special'
+  const punch = a.state === 'punch'
+    ? limbPhase(fr, a.startup, a.active, a.recovery)
+    : a.state === 'special'
+      ? softmax
+        ? fr < 9
+          ? -0.3 * (fr / 9)
+          : fr < 15
+            ? 1
+            : 1 - ease(Math.min(1, (fr - 15) / 18))
+        : 0.9
+      : 0
+  const kick = a.state === 'kick' ? limbPhase(fr, a.startup, a.active, a.recovery) : 0
   const step = a.state === 'walk' ? Math.sin(a.anim / 3.1) : a.state === 'idle' ? Math.sin(a.anim / 14) * 0.35 : 0
   const bob = a.state === 'idle' ? Math.sin(a.anim / 9) * 3.2 : a.state === 'win' ? -Math.abs(Math.sin(a.anim / 5)) * 10 : 0
-  const lean = a.state === 'punch' ? 0.1 : a.state === 'kick' ? -0.16 : a.state === 'block' ? -0.06 : a.state === 'hit' ? 0.2 : 0
+  const hurt = a.state === 'hit' || a.state === 'launch'
+  const lean =
+    (a.state === 'punch' ? 0.12 : a.state === 'kick' ? -0.18 : a.state === 'block' ? -0.06 : hurt ? 0.28 : 0) +
+    a.recoil * 0.018
   const guard = a.state === 'block'
   const cheer = a.state === 'win'
   const ko = a.state === 'ko'
+  const upper = softmax && fr >= 9 && fr < 15
   const backFoot: Pt = [-18 + step * 18, 0]
   const frontFoot: Pt = [16 - step * 18 + kick * 78, -kick * 28]
-  const backHand: Pt = guard ? [2, -124] : cheer ? [-28, -168] : ko ? [-34, -48] : [-32 - step * 12, -72]
+  const backHand: Pt = guard ? [2, -124] : cheer ? [-28, -168] : ko ? [-34, -48] : hurt ? [-40, -60] : [-32 - step * 12, -72]
   const frontHand: Pt = guard
     ? [28, -128]
     : cheer
       ? [26, -172]
       : ko
         ? [36, -42]
-        : [22 + punch * 72, -82 - punch * 8]
+        : hurt
+          ? [8, -70]
+          : upper
+            ? [18 + punch * 20, -150]
+            : [22 + punch * 72, -82 - punch * 8]
   return {
     bob,
     crouch: a.crouching ? 30 : 0,
     lean,
-    shift: a.state === 'walk' ? step * 3 : 0,
+    shift: (a.state === 'walk' ? step * 3 : 0) - (hurt ? 8 : 0) - a.recoil * 0.7,
     backHip: [-14, -64],
     frontHip: [14, -64],
     backFoot,
@@ -603,6 +681,9 @@ function drawTorso(ctx: CanvasRenderingContext2D, a: Actor, bulk: Bulk) {
 function drawHead(ctx: CanvasRenderingContext2D, a: Actor, bulk: Bulk) {
   const r = bulk.head
   const cy = -128
+  const hit = a.state === 'hit' || a.state === 'launch' || a.state === 'ko'
+  ctx.save()
+  if (hit || a.recoil > 0) ctx.translate(-4 - a.recoil * 0.35, hit ? -3 : 0)
   limb(ctx, [0, -112], [0, cy + r * 0.35], 8, a.def.skin)
   const head = ctx.createRadialGradient(-8, cy - 6, 4, 2, cy, r + 4)
   head.addColorStop(0, shade(a.def.skin, 0.28))
@@ -622,7 +703,6 @@ function drawHead(ctx: CanvasRenderingContext2D, a: Actor, bulk: Bulk) {
   ctx.ellipse(r * 0.82, cy + 2, 5, 7, 0, 0, Math.PI * 2)
   ctx.fill()
   drawHair(ctx, a.def, r, cy)
-  const hit = a.state === 'hit' || a.state === 'launch' || a.state === 'ko'
   const win = a.state === 'win'
   const eyeY = cy - 2
   if (a.state === 'ko') {
@@ -670,6 +750,7 @@ function drawHead(ctx: CanvasRenderingContext2D, a: Actor, bulk: Bulk) {
     ctx.lineTo(3, eyeY - 1)
     ctx.stroke()
   }
+  ctx.restore()
 }
 
 function xEye(ctx: CanvasRenderingContext2D, x: number, y: number) {
@@ -1137,12 +1218,38 @@ function drawSpark(ctx: CanvasRenderingContext2D, s: Spark, cam: Cam) {
     ctx.fillText(s.text, 0, 0)
   } else if (s.kind === 'ring') {
     ctx.strokeStyle = s.color
-    ctx.lineWidth = 3
+    ctx.lineWidth = 4
+    ctx.shadowColor = s.color
+    ctx.shadowBlur = 12
+    ctx.beginPath()
+    ctx.arc(0, 0, (1 - t) * (s.size + 28) + 8, 0, Math.PI * 2)
+    ctx.stroke()
+  } else if (s.kind === 'streak') {
+    ctx.rotate(s.rot)
+    ctx.fillStyle = s.color
     ctx.shadowColor = s.color
     ctx.shadowBlur = 8
+    ctx.fillRect(-s.size * 2.4, -1.6, s.size * 4.8, 3.2)
+  } else if (s.kind === 'shard') {
+    ctx.rotate(s.rot)
+    ctx.fillStyle = s.color
     ctx.beginPath()
-    ctx.arc(0, 0, (1 - t) * 46 + 8, 0, Math.PI * 2)
-    ctx.stroke()
+    ctx.moveTo(0, -s.size * 1.4)
+    ctx.lineTo(s.size * 0.45, s.size)
+    ctx.lineTo(-s.size * 0.45, s.size)
+    ctx.closePath()
+    ctx.fill()
+  } else if (s.kind === 'flash') {
+    const rad = s.size * (0.72 + t * 0.45)
+    const g = ctx.createRadialGradient(0, 0, 2, 0, 0, rad)
+    g.addColorStop(0, 'rgba(255,255,255,0.95)')
+    g.addColorStop(0.35, s.color)
+    g.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.fillStyle = g
+    ctx.beginPath()
+    ctx.arc(0, 0, rad, 0, Math.PI * 2)
+    ctx.fill()
   } else {
     star(ctx, 0, 0, s.size + 3, s.color)
   }
@@ -1234,7 +1341,7 @@ function drawHud(ctx: CanvasRenderingContext2D, m: Match) {
     ctx.fillStyle = '#f6f3ea'
     ctx.fillText('VS', VW / 2, 250)
   }
-  if (m.phase === 'fight' && m.frame < 220) {
+  if (m.phase === 'fight' && m.frame < 220 && m.hitstop === 0) {
     ctx.textAlign = 'center'
     ctx.font = '600 13px "Sora", sans-serif'
     ctx.fillStyle = 'rgba(246,243,234,0.8)'
@@ -1305,6 +1412,58 @@ function plate(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, f
     ctx.fillStyle = '#e7ff52'
     ctx.fillText(`${f.chain}-HIT CHAIN`, mirror ? x + w : x, y + 74)
   }
+}
+
+function drawImpact(ctx: CanvasRenderingContext2D, m: Match, cam: Cam) {
+  const p = project(m.impactX, m.impactY, cam)
+  const rad = [36, 62, 96][m.impactTier] * (0.85 + m.impact * 0.35)
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.globalAlpha = Math.min(1, m.impact)
+  const g = ctx.createRadialGradient(p.x, p.y, 4, p.x, p.y, rad)
+  g.addColorStop(0, 'rgba(255,255,255,0.9)')
+  g.addColorStop(0.4, 'rgba(255,220,160,0.45)')
+  g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = g
+  ctx.beginPath()
+  ctx.arc(p.x, p.y, rad, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawFrameHud(ctx: CanvasRenderingContext2D, m: Match) {
+  const lines: string[] = []
+  for (const f of m.fighters) {
+    const read = attackRead(f)
+    if (!read) continue
+    const tag = read.cancel && read.phase !== 'STARTUP' ? '  CANCEL' : ''
+    lines.push(`${f.def.last}  ${read.name}  f${read.now}  ${read.phase}${tag}`)
+    lines.push(`SU ${read.startup}   ACT ${read.active}   REC ${read.recovery}`)
+  }
+  if (m.hitstop > 0) lines.push(`HIT STOP ${m.hitstop}`)
+  if (m.lastAdvT > 0) {
+    const sign = m.lastAdv > 0 ? '+' : ''
+    lines.push(`FRAME ADV  ${sign}${m.lastAdv}`)
+  }
+  if (!lines.length) lines.push('FRAME DATA  ·  idle')
+  ctx.save()
+  ctx.font = '700 16px "Bebas Neue", Impact, sans-serif'
+  const w = 280
+  const h = 16 + lines.length * 20
+  ctx.translate(36, 118)
+  ctx.fillStyle = 'rgba(8,5,4,0.82)'
+  ctx.strokeStyle = '#e7ff52'
+  ctx.lineWidth = 2
+  round(ctx, 0, 0, w, h, 4)
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = '#f6f3ea'
+  ctx.textAlign = 'left'
+  lines.forEach((line, i) => {
+    ctx.fillStyle = line.startsWith('FRAME ADV') || line.startsWith('HIT STOP') ? '#e7ff52' : '#f6f3ea'
+    ctx.fillText(line, 12, 22 + i * 20)
+  })
+  ctx.restore()
 }
 
 function drawSpeedLines(ctx: CanvasRenderingContext2D, m: Match) {

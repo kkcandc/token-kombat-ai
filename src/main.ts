@@ -16,6 +16,7 @@ const HELP = [
   ['Block', 'P1 I or Left Shift · P2 period or Right Shift'],
   ['Round', 'First to two. Meter funds the special.'],
   ['Menus', 'Enter confirms · Esc pauses · M mutes'],
+  ['Frame data', 'F3 or the Frames button. Startup, active, recovery, advantage.'],
 ]
 
 const audio = new ArcadeAudio()
@@ -57,6 +58,7 @@ let prev = emptyPad()
 let prev2 = emptyPad()
 
 const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+let showFrames = false
 
 function randomDemo() {
   const a = ROSTER[Math.floor(Math.random() * ROSTER.length)].id
@@ -231,6 +233,14 @@ document.getElementById('btn-music')!.addEventListener('click', () => {
   const on = audio.toggleMusic()
   document.getElementById('btn-music')!.textContent = on ? 'Music on' : 'Music off'
 })
+document.getElementById('btn-frames')!.addEventListener('click', () => toggleFrames())
+
+function toggleFrames(force?: boolean) {
+  showFrames = force ?? !showFrames
+  const btn = document.getElementById('btn-frames')!
+  btn.textContent = showFrames ? 'Frames on' : 'Frames'
+  btn.classList.toggle('primary', showFrames)
+}
 
 function togglePause(force?: boolean) {
   if (screen !== 'fight' || !match || match.phase === 'matchend') return
@@ -258,6 +268,10 @@ window.addEventListener('keydown', (e) => {
   const fightKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD']
   if (screen === 'fight' && fightKeys.includes(e.code)) e.preventDefault()
   if ((screen === 'select' || screen === 'title' || screen === 'mode') && e.code.startsWith('Arrow')) e.preventDefault()
+  if (e.code === 'F3') {
+    e.preventDefault()
+    toggleFrames()
+  }
   if (e.code === 'KeyM' && screen === 'fight') {
     const muted = audio.toggleMute()
     document.getElementById('btn-mute')!.textContent = muted ? 'Sound off' : 'Sound on'
@@ -412,12 +426,12 @@ function loop(now: number) {
   }
   if (screen === 'title') {
     attractCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    renderMatch(attractCtx, titleMatch, reduce)
+    renderMatch(attractCtx, titleMatch, reduce, false)
   } else if (screen === 'select' && frame % 2 === 0) {
     drawCards(frame)
   } else if (screen === 'fight' && match) {
     gameCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    renderMatch(gameCtx, match, reduce)
+    renderMatch(gameCtx, match, reduce, showFrames)
   }
   requestAnimationFrame(loop)
 }

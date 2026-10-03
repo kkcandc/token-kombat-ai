@@ -74,6 +74,7 @@ export interface Fighter {
   strikeAir: boolean
   strikeLow: boolean
   damageTaken: number
+  recoil: number
 }
 
 export interface Projectile {
@@ -121,6 +122,8 @@ export interface Clone {
   defId: string
 }
 
+export type HitTier = 'light' | 'mid' | 'heavy'
+
 export interface Spark {
   x: number
   y: number
@@ -131,7 +134,8 @@ export interface Spark {
   color: string
   size: number
   text?: string
-  kind: 'dot' | 'text' | 'ring'
+  rot: number
+  kind: 'dot' | 'text' | 'ring' | 'streak' | 'shard' | 'flash'
 }
 
 export interface Ghost {
@@ -156,6 +160,7 @@ export interface Pending {
   sourceY: number
   kind: string
   root: number
+  tier: HitTier
 }
 
 export interface Bubble {
@@ -191,6 +196,17 @@ export interface Match {
   koFlash: number
   winner: 0 | 1 | null
   fxCount: number
+  zoomKick: number
+  panKick: number
+  kickX: number
+  kickY: number
+  impact: number
+  impactTier: 0 | 1 | 2
+  impactX: number
+  impactY: number
+  lastAdv: number
+  lastAdvT: number
+  koHold: 0 | 1 | null
 }
 
 export function emptyPad(): Pad {
