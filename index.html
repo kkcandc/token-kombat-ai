@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TOKEN KOMBAT</title>
+    <meta name="token-kombat-build" content="hit-shake-2026-10-11" />
+    <meta
+      name="description"
+      content="TOKEN KOMBAT — a 1v1 neon arena fighter with stylized AI-world toons. First to two rounds in the Token Coliseum."
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Sora:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div id="app">
+      <section id="screen-title" class="screen">
+        <canvas id="attract" width="1280" height="720" aria-hidden="true"></canvas>
+        <div class="veil">
+          <p class="eyebrow">Arcade attract mode · First to two rounds</p>
+          <h1>
+            <span class="token">TOKEN</span>
+            <span class="kombat">KOMBAT</span>
+          </h1>
+          <p class="tag">Twelve stylized 2026 toons. One neon ring. Weird powers that fit the bit.</p>
+          <div class="cta-row">
+            <button id="btn-enter" class="btn primary">Enter the Coliseum</button>
+            <button id="btn-how" class="btn ghost">Controls</button>
+          </div>
+          <div class="marquee" aria-hidden="true">
+            <div>
+              <span>ALTMAN · MUSK · HUANG · HASSABIS · AMODEI · MURATI · SUTSKEVER · ZUCKERBERG · NADELLA · LI · LECUN · KARPATHY ·&nbsp;</span>
+              <span>ALTMAN · MUSK · HUANG · HASSABIS · AMODEI · MURATI · SUTSKEVER · ZUCKERBERG · NADELLA · LI · LECUN · KARPATHY ·&nbsp;</span>
+            </div>
+          </div>
+          <p class="fine">
+            Affectionate satire of public figures. Original game, original calls. Not affiliated with those people, their labs, or any fighting-game studio. The Swisher Booth does the announcing.
+          </p>
+        </div>
+      </section>
+
+      <section id="screen-mode" class="screen hidden">
+        <header class="topbar">
+          <button id="btn-mode-back" class="btn tiny">Back</button>
+          <p class="eyebrow">Pick a card</p>
+        </header>
+        <div class="mode-wrap">
+          <h2>Who's in the ring?</h2>
+          <div class="mode-grid">
+            <button id="btn-cpu" class="mode-card">
+              <span class="kicker">Solo</span>
+              <strong>Versus CPU</strong>
+              <em>You pick both benches. The coliseum drives the other corner.</em>
+            </button>
+            <button id="btn-local" class="mode-card">
+              <span class="kicker">Same keyboard</span>
+              <strong>Local 2P</strong>
+              <em>P1 on the left cluster. P2 on the right. First to two.</em>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-select" class="screen hidden">
+        <header class="topbar">
+          <button id="btn-select-back" class="btn tiny">Back</button>
+          <p class="eyebrow" id="select-kicker">Roster</p>
+          <button id="btn-random" class="btn tiny">Random rival</button>
+        </header>
+        <div class="slots">
+          <button id="slot-0" class="slot active" type="button"></button>
+          <div class="vs-mark">VS</div>
+          <button id="slot-1" class="slot" type="button"></button>
+        </div>
+        <div id="roster" class="roster"></div>
+        <footer class="select-foot">
+          <div>
+            <p id="blurb-name" class="blurb-name">Choose a fighter</p>
+            <p id="blurb" class="blurb">Arrow keys move. Enter locks the highlighted toon into the open slot.</p>
+          </div>
+          <button id="btn-start" class="btn primary" disabled>Start bout</button>
+        </footer>
+      </section>
+
+      <section id="screen-fight" class="screen hidden">
+        <canvas id="game" width="1280" height="720" aria-label="Token Kombat match"></canvas>
+        <div class="fight-chrome">
+          <button id="btn-mute" class="btn tiny">Sound on</button>
+          <button id="btn-music" class="btn tiny">Music on</button>
+          <button id="btn-frames" class="btn tiny">Frames</button>
+          <button id="btn-pause" class="btn tiny">Pause</button>
+        </div>
+        <div id="pause-card" class="overlay hidden">
+          <div class="sheet">
+            <h2>Paused</h2>
+            <div id="help-copy"></div>
+            <div class="cta-row">
+              <button id="btn-resume" class="btn primary">Resume</button>
+              <button id="btn-quit" class="btn ghost">Quit to roster</button>
+            </div>
+          </div>
+        </div>
+        <div id="result" class="overlay hidden">
+          <div class="sheet result-sheet">
+            <p class="eyebrow">Benchmark decided</p>
+            <h2 id="result-title">The loop is closed.</h2>
+            <p id="result-sub"></p>
+            <div class="cta-row">
+              <button id="btn-rematch" class="btn primary">Rematch</button>
+              <button id="btn-new" class="btn ghost">New bout</button>
+            </div>
+          </div>
+        </div>
+        <div class="touch" id="touch">
+          <div class="touch-move">
+            <button type="button" data-b="up">▲</button>
+            <div>
+              <button type="button" data-b="left">◀</button>
+              <button type="button" data-b="down">▼</button>
+              <button type="button" data-b="right">▶</button>
+            </div>
+          </div>
+          <div class="touch-act">
+            <button type="button" data-b="block">BLOCK</button>
+            <button type="button" data-b="punch">PUNCH</button>
+            <button type="button" data-b="kick">KICK</button>
+            <button type="button" data-b="special">SPECIAL</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="modal-help" class="overlay hidden">
+      <div class="sheet">
+        <h2>Controls</h2>
+        <div id="help-home"></div>
+        <button id="btn-close-help" class="btn primary">Close</button>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
