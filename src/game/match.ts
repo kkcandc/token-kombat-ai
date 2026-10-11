@@ -1596,7 +1596,7 @@ function feelConnect(m: Match, x: number, y: number, color: string, tier: HitTie
     })
   }
   if (!blocked) {
-    const dust = 5 + i * 3
+    const dust = 4 + i
     for (let k = 0; k < dust; k++) {
       m.sparks.push({
         x: x + (k - dust / 2) * 7,

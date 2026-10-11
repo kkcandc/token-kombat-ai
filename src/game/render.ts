@@ -1040,8 +1040,7 @@ function limb(ctx: CanvasRenderingContext2D, a: Pt, b: Pt, r: number, color: str
 function drawGhost(ctx: CanvasRenderingContext2D, g: { x: number; y: number; life: number; color: string }, cam: Cam) {
   const p = project(g.x, g.y, cam)
   ctx.save()
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.globalAlpha = g.life / 12
+  ctx.globalAlpha = Math.min(0.85, g.life / 14)
   ctx.fillStyle = g.color
   ctx.beginPath()
   ctx.ellipse(p.x, p.y - 70 * cam.zoom, 18 * cam.zoom, 48 * cam.zoom, 0, 0, Math.PI * 2)
@@ -1245,18 +1244,19 @@ function drawSpark(ctx: CanvasRenderingContext2D, s: Spark, cam: Cam) {
     ctx.fill()
   } else if (s.kind === 'slash') {
     ctx.rotate(s.rot)
-    ctx.globalCompositeOperation = 'lighter'
     ctx.strokeStyle = '#fff'
-    ctx.fillStyle = s.color
-    ctx.lineWidth = 7
-    ctx.shadowColor = '#fff'
-    ctx.shadowBlur = 16
+    ctx.lineWidth = 8
+    ctx.lineCap = 'round'
     ctx.beginPath()
     ctx.moveTo(-s.size, 0)
     ctx.lineTo(s.size, 0)
     ctx.stroke()
-    ctx.globalAlpha *= 0.85
-    ctx.fillRect(-s.size * 0.35, -3, s.size * 0.7, 6)
+    ctx.lineWidth = 3
+    ctx.strokeStyle = s.color
+    ctx.beginPath()
+    ctx.moveTo(-s.size * 0.72, 0)
+    ctx.lineTo(s.size * 0.72, 0)
+    ctx.stroke()
   } else if (s.kind === 'flash') {
     const rad = s.size * (0.72 + t * 0.45)
     const g = ctx.createRadialGradient(0, 0, 2, 0, 0, rad)
