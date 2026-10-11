@@ -1,4 +1,5 @@
 import { GROUND } from './game/constants'
+import { screenShake } from './game/juice'
 import { createMatch, stepMatch } from './game/match'
 import { ROSTER } from './game/roster'
 import { emptyPad, type Match, type Pad } from './game/types'
@@ -204,7 +205,14 @@ for (const def of ROSTER) {
   assert(m.fighters[1].hp < 100, 'altman light should connect')
   assert(m.hitstop === 2, `light hitstop ${m.hitstop}`)
   assert(m.zoomKick > 0.04, 'camera kick on light')
+  assert(m.shake >= 8, `light shake should rattle, shake ${m.shake}`)
+  assert(m.ghosts.length > 0, 'clean hit should leave a smear')
+  assert(m.sparks.some((s) => s.kind === 'slash'), 'clean hit should cut a slash')
   assert(m.sparks.some((s) => s.kind === 'flash' || s.kind === 'streak' || s.kind === 'shard'), 'light sparks')
+  const held = screenShake(m.shake, m.frame, m.hitstop)
+  const next = screenShake(m.shake, m.frame, m.hitstop - 1)
+  assert(Math.abs(held.x) >= 2, `shake offset too small ${held.x}`)
+  assert(held.x !== next.x || held.y !== next.y, 'hitstop frames should rattle, not lock one offset')
   const heldFrame = m.frame
   const heldPose = m.fighters[0].stateFrame
   const heldX = m.fighters[1].x
@@ -270,6 +278,14 @@ for (const def of ROSTER) {
     if (m.fighters[1].hp < before) stop = m.hitstop
   }
   assert(stop === 6, `heavy hitstop ${stop}`)
+}
+
+{
+  assert(screenShake(0, 10, 0).x === 0 && screenShake(0, 10, 0).y === 0, 'idle camera should sit still')
+  for (let step = 0; step < 6; step++) {
+    const off = screenShake(8, step, 0)
+    assert(Math.abs(off.x) >= 2, `light rattle step ${step} x=${off.x}`)
+  }
 }
 
 if (failures.length) {

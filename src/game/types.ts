@@ -135,7 +135,7 @@ export interface Spark {
   size: number
   text?: string
   rot: number
-  kind: 'dot' | 'text' | 'ring' | 'streak' | 'shard' | 'flash'
+  kind: 'dot' | 'text' | 'ring' | 'streak' | 'shard' | 'flash' | 'slash'
 }
 
 export interface Ghost {

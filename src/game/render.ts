@@ -1,4 +1,5 @@
 import { GROUND, VH, VW, clamp } from './constants'
+import { screenShake } from './juice'
 import { attackRead } from './match'
 import type { FighterDef } from './roster'
 import { getFighter } from './roster'
@@ -33,7 +34,10 @@ export function renderMatch(ctx: CanvasRenderingContext2D, m: Match, reduceMotio
   ctx.clearRect(0, 0, VW, VH)
   drawBackdrop(ctx, m)
   ctx.save()
-  if (!reduceMotion) ctx.translate(m.kickX, m.kickY)
+  if (!reduceMotion) {
+    const rattle = screenShake(m.shake, m.frame, m.hitstop)
+    ctx.translate(m.kickX + rattle.x, m.kickY + rattle.y)
+  }
   const cam = cameraFor(m, reduceMotion)
   drawFloor(ctx, m, cam)
   for (const z of m.zones) drawZone(ctx, z, cam, m.frame)
@@ -1239,6 +1243,20 @@ function drawSpark(ctx: CanvasRenderingContext2D, s: Spark, cam: Cam) {
     ctx.lineTo(-s.size * 0.45, s.size)
     ctx.closePath()
     ctx.fill()
+  } else if (s.kind === 'slash') {
+    ctx.rotate(s.rot)
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.strokeStyle = '#fff'
+    ctx.fillStyle = s.color
+    ctx.lineWidth = 7
+    ctx.shadowColor = '#fff'
+    ctx.shadowBlur = 16
+    ctx.beginPath()
+    ctx.moveTo(-s.size, 0)
+    ctx.lineTo(s.size, 0)
+    ctx.stroke()
+    ctx.globalAlpha *= 0.85
+    ctx.fillRect(-s.size * 0.35, -3, s.size * 0.7, 6)
   } else if (s.kind === 'flash') {
     const rad = s.size * (0.72 + t * 0.45)
     const g = ctx.createRadialGradient(0, 0, 2, 0, 0, rad)

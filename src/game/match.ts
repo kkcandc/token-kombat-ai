@@ -409,7 +409,7 @@ function updateFighter(m: Match, f: Fighter, pad: Pad) {
   if (f.hitstun > 0) {
     f.hitstun--
     f.x += f.vx
-    f.vx *= 0.82
+    f.vx *= 0.9
     if (!f.grounded) f.state = 'launch'
     else if (f.hitstun <= 0 && f.state !== 'getup') f.state = 'idle'
     return
@@ -1341,6 +1341,16 @@ function resolveHit(m: Match, hit: Pending) {
   spark(m, contactX, contactY - 28, blocking ? '#f4f1ea' : '#fff6df', blocking ? 'GUARD' : `-${dmg}`)
   target.recoil = blocking ? 4 : tier === 'heavy' ? 12 : tier === 'mid' ? 9 : 6
   target.flash = blocking ? 4 : tier === 'heavy' ? 12 : tier === 'mid' ? 9 : 6
+  if (!blocking) {
+    m.ghosts.push({
+      x: target.x,
+      y: target.y,
+      facing: target.facing,
+      life: tier === 'heavy' ? 22 : tier === 'mid' ? 18 : 14,
+      color: '#fff6df',
+    })
+    if (m.ghosts.length > 24) m.ghosts.shift()
+  }
 
   if (hit.kind === 'rocket') {
     m.bubble = { x: target.x, y: target.y - 150, text: ROASTS[Math.floor(rand(m) * ROASTS.length)], life: 64 }
@@ -1510,7 +1520,7 @@ function feelConnect(m: Match, x: number, y: number, color: string, tier: HitTie
   m.impactTier = blocked ? 0 : i
   m.impactX = x
   m.impactY = y
-  m.shake = Math.max(m.shake, [5, 9, 14][i] * (blocked ? 0.5 : 1))
+  m.shake = Math.max(m.shake, [8, 12, 16][i] * (blocked ? 0.55 : 1))
   const count = blocked ? 6 : [9, 14, 20][i]
   const life = [14, 20, 28][i]
   for (let k = 0; k < count; k++) {
@@ -1570,6 +1580,38 @@ function feelConnect(m: Match, x: number, y: number, color: string, tier: HitTie
     rot: 0,
     kind: 'flash',
   })
+  const slashes = blocked ? 1 : 2 + i
+  for (let s = 0; s < slashes; s++) {
+    m.sparks.push({
+      x,
+      y,
+      vx: 0,
+      vy: 0,
+      life: 10 + i * 4,
+      max: 10 + i * 4,
+      color,
+      size: [34, 52, 78][i],
+      rot: -0.85 + s * 0.62,
+      kind: 'slash',
+    })
+  }
+  if (!blocked) {
+    const dust = 5 + i * 3
+    for (let k = 0; k < dust; k++) {
+      m.sparks.push({
+        x: x + (k - dust / 2) * 7,
+        y: GROUND - 6,
+        vx: (k % 2 === 0 ? -1 : 1) * (1.4 + i * 0.6),
+        vy: -0.35 - (k % 3) * 0.25,
+        life: 16 + i * 4,
+        max: 16 + i * 4,
+        color: k % 2 === 0 ? '#d9cbb8' : '#fff6df',
+        size: 3 + i,
+        rot: 0,
+        kind: 'dot',
+      })
+    }
+  }
   if (m.sparks.length > 180) m.sparks.splice(0, m.sparks.length - 180)
 }
 
@@ -1613,7 +1655,7 @@ function decayFx(m: Match, freeze: boolean) {
   const hold = freeze || m.hitstop > 0
   if (!freeze) m.frame++
   if (hold) return
-  m.shake *= 0.82
+  m.shake *= 0.9
   if (m.shake < 0.25) m.shake = 0
   m.zoomKick *= 0.84
   m.panKick *= 0.84
@@ -1631,7 +1673,7 @@ function decayFx(m: Match, freeze: boolean) {
     if (m.bubble.life <= 0) m.bubble = null
   }
   for (const s of m.sparks) {
-    if (s.kind !== 'flash' && s.kind !== 'ring') {
+    if (s.kind !== 'flash' && s.kind !== 'ring' && s.kind !== 'slash') {
       s.x += s.vx
       s.y += s.vy
       s.vy += s.kind === 'text' ? 0 : 0.18
