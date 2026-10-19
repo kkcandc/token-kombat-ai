@@ -1,5 +1,5 @@
 import { GROUND } from './game/constants'
-import { screenShake } from './game/juice'
+import { koStampScale, koTimeScale, screenShake } from './game/juice'
 import { createMatch, stepMatch } from './game/match'
 import { ROSTER } from './game/roster'
 import { emptyPad, type Match, type Pad } from './game/types'
@@ -286,6 +286,88 @@ for (const def of ROSTER) {
     const off = screenShake(8, step, 0)
     assert(Math.abs(off.x) >= 2, `light rattle step ${step} x=${off.x}`)
   }
+}
+
+{
+  const m = createMatch('altman', 'jensen', 'local', 31)
+  toFight(m)
+  place(m, 800, 860)
+  m.fighters[1].hp = 6
+  m.fighters[1].invuln = 0
+  let guard = 0
+  while (m.fighters[1].hp > 0 && guard < 40) {
+    const pad = emptyPad()
+    pad.punch = true
+    pad.punchPressed = guard === 0
+    stepMatch(m, [pad, emptyPad()])
+    guard++
+  }
+  assert(m.fighters[1].hp === 0, `ko should empty the bar, hp ${m.fighters[1].hp}`)
+  assert(Math.abs(m.fighters[1].vx) >= 14, `ko launch vx ${m.fighters[1].vx}`)
+  assert(m.fighters[1].vy <= -8, `ko launch vy ${m.fighters[1].vy}`)
+  assert(Math.abs(m.fighters[1].tumbleV) > 0.2, `ko tumble ${m.fighters[1].tumbleV}`)
+  let sawSlow = false
+  let rose = false
+  let prev = 0
+  for (let i = 0; i < 90 && !(m.phase === 'roundend' && (m.finish?.age ?? 0) > (m.finish?.beat ?? 0)); i++) {
+    stepMatch(m, [emptyPad(), emptyPad()])
+    const fin = m.finish
+    if (fin?.kind === 'ko' && m.phase === 'fight') {
+      if (fin.scale < 0.5) sawSlow = true
+      if (prev > 0 && fin.scale > prev + 0.001) rose = true
+      prev = fin.scale
+    }
+  }
+  assert(sawSlow, 'ko beat should start in slow motion')
+  assert(rose, 'ko time scale should ramp back up')
+  assert(m.fighters[0].wins >= 1, 'ko should award the round')
+  assert(m.phase === 'roundend', `ko beat should hand off to the round call, phase ${m.phase}`)
+  assert(m.finish?.kind === 'ko', 'K.O. stamp should still be up as the call starts')
+}
+
+{
+  const m = createMatch('altman', 'jensen', 'local', 32)
+  toFight(m)
+  m.reduceMotion = true
+  place(m, 800, 860)
+  m.fighters[1].hp = 6
+  m.fighters[1].invuln = 0
+  for (let i = 0; i < 30 && m.fighters[1].hp > 0; i++) {
+    const pad = emptyPad()
+    pad.punch = true
+    pad.punchPressed = i === 0
+    stepMatch(m, [pad, emptyPad()])
+  }
+  for (let i = 0; i < 12 && m.finish?.kind !== 'ko'; i++) stepMatch(m, [emptyPad(), emptyPad()])
+  assert(m.finish?.kind === 'ko', 'reduced motion still gets a K.O. stamp')
+  assert(m.finish?.scale === 1, `reduced motion skips slow-mo, scale ${m.finish?.scale}`)
+}
+
+{
+  const m = createMatch('altman', 'jensen', 'local', 33)
+  toFight(m)
+  m.fighters[0].hp = 40
+  m.fighters[1].hp = 55
+  m.timer = 1
+  stepMatch(m, [emptyPad(), emptyPad()])
+  assert(m.phase === 'roundend', `timeout phase ${m.phase}`)
+  assert(m.finish?.kind === 'time', `timeout should stamp TIME, got ${m.finish?.kind}`)
+  assert(m.finish?.beat === 0, 'timeout does not run the KO beat')
+  assert(m.sub.includes('LOSS CURVE'), `timeout copy ${m.sub}`)
+  assert(m.fighters[0].state !== 'ko' && m.fighters[1].state !== 'ko', 'timeout is not a knockdown')
+  assert(Math.abs(m.fighters[0].tumbleV) < 0.01 && Math.abs(m.fighters[1].tumbleV) < 0.01, 'timeout does not tumble')
+}
+
+{
+  assert(Math.abs(koTimeScale(0) - 0.15) < 1e-9, 'slow-mo starts at 0.15')
+  assert(koTimeScale(1) === 1, 'slow-mo returns to full speed')
+  assert(koTimeScale(0.4, true) === 1, 'reduced motion time scale stays 1')
+  assert(koTimeScale(0.5) < koTimeScale(0.9), 'scale ramps upward')
+  const over = koStampScale(8)
+  const settled = koStampScale(20)
+  assert(over > 1, `stamp should overshoot, got ${over}`)
+  assert(Math.abs(settled - 1) < 0.02, `stamp should settle near 1, got ${settled}`)
+  assert(koStampScale(4, true) === 1, 'reduced motion stamp does not bounce')
 }
 
 if (failures.length) {

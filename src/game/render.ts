@@ -1,5 +1,5 @@
 import { GROUND, VH, VW, clamp } from './constants'
-import { screenShake } from './juice'
+import { koCamera, koStampAlpha, koStampScale, koStampShake, screenShake } from './juice'
 import { attackRead } from './match'
 import type { FighterDef } from './roster'
 import { getFighter } from './roster'
@@ -24,6 +24,7 @@ interface Actor {
   startup: number
   active: number
   recovery: number
+  spin: number
 }
 
 type Pt = [number, number]
@@ -60,6 +61,7 @@ export function renderMatch(ctx: CanvasRenderingContext2D, m: Match, reduceMotio
       startup: 5,
       active: 3,
       recovery: 10,
+      spin: 0,
     })
   }
   const ordered = [...m.fighters].sort((a, b) => a.y - b.y)
@@ -74,14 +76,21 @@ export function renderMatch(ctx: CanvasRenderingContext2D, m: Match, reduceMotio
   drawHud(ctx, m)
   if (showFrames) drawFrameHud(ctx, m)
   if (m.koFlash > 0) {
-    ctx.fillStyle = `rgba(255,248,230,${m.koFlash / 22})`
+    const raw = m.koFlash / 16
+    const a = Math.min(reduceMotion ? 0.3 : 0.82, raw)
+    ctx.fillStyle = `rgba(255,248,230,${a})`
     ctx.fillRect(0, 0, VW, VH)
+    if (!reduceMotion && m.koTint) {
+      ctx.fillStyle = hexA(m.koTint, a * 0.42)
+      ctx.fillRect(0, 0, VW, VH)
+    }
   } else if (m.impact > 0.05 && !reduceMotion) {
     const wash = [0.1, 0.18, 0.34][m.impactTier] * m.impact
     ctx.fillStyle = `rgba(255,244,226,${wash})`
     ctx.fillRect(0, 0, VW, VH)
   }
   vignette(ctx)
+  if (m.finish) drawFinishStamp(ctx, m, reduceMotion)
 }
 
 export function renderPortrait(ctx: CanvasRenderingContext2D, def: FighterDef, anim: number) {
@@ -120,6 +129,7 @@ export function renderPortrait(ctx: CanvasRenderingContext2D, def: FighterDef, a
     startup: 0,
     active: 0,
     recovery: 0,
+    spin: 0,
   })
   ctx.restore()
 }
@@ -140,14 +150,21 @@ function actorFrom(f: Fighter): Actor {
     startup: read?.startup ?? 0,
     active: read?.active ?? 0,
     recovery: read?.recovery ?? 0,
+    spin: f.tumble,
   }
 }
 
 function cameraFor(m: Match, reduceMotion: boolean): Cam {
-  const mid = (m.fighters[0].x + m.fighters[1].x) / 2 + (reduceMotion ? 0 : m.panKick)
+  let mid = (m.fighters[0].x + m.fighters[1].x) / 2 + (reduceMotion ? 0 : m.panKick)
   const dist = Math.abs(m.fighters[0].x - m.fighters[1].x)
   const base = clamp(1080 / (dist + 460), 0.98, 1.22)
-  const zoom = reduceMotion ? base : clamp(base + m.zoomKick, 0.98, 1.46)
+  let zoom = reduceMotion ? base : clamp(base + m.zoomKick, 0.98, 1.46)
+  if (m.finish?.kind === 'ko') {
+    const push = koCamera(m.finish.age, m.finish.beat, reduceMotion)
+    const loser = m.fighters[m.finish.focus]
+    mid += (loser.x - mid) * push.bias
+    zoom = clamp(zoom + push.zoom, 0.98, 1.74)
+  }
   return { mid, zoom }
 }
 
@@ -365,7 +382,8 @@ function drawWorld(ctx: CanvasRenderingContext2D, cam: Cam, x: number, y: number
   ctx.save()
   ctx.translate(p.x, p.y)
   ctx.scale(facing * z, z)
-  if (actor.state === 'ko') ctx.rotate(-1.15)
+  if (Math.abs(actor.spin) > 0.02) ctx.rotate(actor.spin)
+  else if (actor.state === 'ko') ctx.rotate(-1.15)
   else if (actor.state === 'hit' || actor.state === 'launch') ctx.rotate(-0.22 - actor.recoil * 0.012)
   else if (actor.recoil > 0) ctx.rotate(-actor.recoil * 0.01)
   ctx.globalAlpha = actor.alpha
@@ -1359,7 +1377,7 @@ function drawHud(ctx: CanvasRenderingContext2D, m: Match) {
     ctx.fillStyle = '#f6f3ea'
     ctx.fillText('VS', VW / 2, 250)
   }
-  if (m.phase === 'fight' && m.frame < 220 && m.hitstop === 0) {
+  if (m.phase === 'fight' && m.frame < 220 && m.hitstop === 0 && !m.finish) {
     ctx.textAlign = 'center'
     ctx.font = '600 13px "Sora", sans-serif'
     ctx.fillStyle = 'rgba(246,243,234,0.8)'
@@ -1497,6 +1515,67 @@ function drawSpeedLines(ctx: CanvasRenderingContext2D, m: Match) {
     ctx.moveTo(cx + Math.cos(a) * 180, cy + Math.sin(a) * 80)
     ctx.lineTo(cx + Math.cos(a) * 420, cy + Math.sin(a) * 180)
     ctx.stroke()
+  }
+  ctx.restore()
+}
+
+function drawFinishStamp(ctx: CanvasRenderingContext2D, m: Match, reduceMotion: boolean) {
+  const fin = m.finish
+  if (!fin) return
+  const alpha = koStampAlpha(fin.age, fin.life)
+  if (alpha <= 0.01) return
+  const ko = fin.kind === 'ko'
+  const scale = ko ? koStampScale(fin.age, reduceMotion) : Math.min(1, fin.age / 8) * 0.58
+  if (scale <= 0.01) return
+  const shake = ko ? koStampShake(fin.age, reduceMotion) : { x: 0, y: 0 }
+  const label = ko ? 'K.O.' : 'TIME'
+  ctx.save()
+  ctx.globalAlpha = alpha * (ko ? 0.38 : 0.2)
+  ctx.fillStyle = '#070302'
+  ctx.fillRect(0, 0, VW, VH)
+  ctx.restore()
+  ctx.save()
+  ctx.globalAlpha = alpha
+  ctx.translate(VW / 2 + shake.x, (ko ? 424 : 400) + shake.y)
+  ctx.rotate(reduceMotion ? 0 : ko ? -0.08 : -0.02)
+  ctx.scale(scale, scale)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.lineJoin = 'round'
+  ctx.font = ko ? '400 196px "Bebas Neue", Impact, sans-serif' : '400 108px "Bebas Neue", Impact, sans-serif'
+  const fit = Math.min(1, (VW * 0.8) / Math.max(1, ctx.measureText(label).width))
+  ctx.scale(fit, fit)
+  ctx.strokeStyle = '#140c0c'
+  ctx.lineWidth = ko ? 20 : 12
+  ctx.strokeText(label, 0, 0)
+  ctx.strokeStyle = ko ? '#ff4b2b' : '#e7ff52'
+  ctx.lineWidth = ko ? 9 : 6
+  ctx.strokeText(label, 7, 7)
+  ctx.fillStyle = ko ? '#e7ff52' : '#f6f3ea'
+  ctx.fillText(label, 0, 0)
+  if (ko) {
+    ctx.strokeStyle = '#e7ff52'
+    ctx.lineWidth = 6
+    ctx.lineCap = 'square'
+    const arms = [
+      [-268, -78, -214, -78],
+      [-268, -78, -268, -34],
+      [268, -78, 214, -78],
+      [268, -78, 268, -34],
+      [-268, 86, -214, 86],
+      [-268, 86, -268, 42],
+      [268, 86, 214, 86],
+      [268, 86, 268, 42],
+    ]
+    for (const [x1, y1, x2, y2] of arms) {
+      ctx.beginPath()
+      ctx.moveTo(x1, y1)
+      ctx.lineTo(x2, y2)
+      ctx.stroke()
+    }
+    ctx.font = '700 26px "Sora", sans-serif'
+    ctx.fillStyle = '#f6f3ea'
+    ctx.fillText('COLISEUM', 0, 118)
   }
   ctx.restore()
 }
