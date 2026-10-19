@@ -1,4 +1,5 @@
 import { GRAV, GROUND, JUMP_V, STAGE_LEFT, STAGE_RIGHT, clamp } from './constants'
+import { koTimeScale } from './juice'
 import { getFighter } from './roster'
 import {
   emptyPad,
@@ -102,6 +103,7 @@ export function createMatch(p1Id: string, p2Id: string, mode: Mode, seed = 1): M
     bubble: null,
     sfx: [],
     koFlash: 0,
+    koTint: '#fff6df',
     winner: null,
     fxCount: 0,
     zoomKick: 0,
@@ -115,6 +117,10 @@ export function createMatch(p1Id: string, p2Id: string, mode: Mode, seed = 1): M
     lastAdv: 0,
     lastAdvT: 0,
     koHold: null,
+    finish: null,
+    roundAwarded: false,
+    reduceMotion: false,
+    debugHp: 0,
   }
   startRound(m)
   return m
@@ -122,15 +128,24 @@ export function createMatch(p1Id: string, p2Id: string, mode: Mode, seed = 1): M
 
 export function stepMatch(m: Match, pads: [Pad, Pad]) {
   m.sfx = []
+  if (m.finish?.kind === 'ko' && m.phase === 'fight' && m.finish.age < m.finish.beat) {
+    tickKoBeat(m)
+    return
+  }
   if (m.hitstop > 0 && m.phase === 'fight') {
     m.hitstop--
     decayFx(m, true)
-    if (m.hitstop === 0 && m.koHold !== null) endRound(m, m.koHold)
+    if (m.hitstop === 0 && m.koHold !== null) {
+      const winner = m.koHold
+      if (m.fighters[1 - winner].hp <= 0) beginKoBeat(m, winner)
+      else endRound(m, winner)
+    }
     return
   }
 
   if (m.phase === 'intro' || m.phase === 'roundend') {
     m.phaseTimer--
+    ageFinish(m)
     for (const f of m.fighters) coast(f)
     if (m.phaseTimer <= 0) {
       if (m.phase === 'intro') {
@@ -182,6 +197,9 @@ function startRound(m: Match) {
   m.timer = 99 * 60
   m.hitstop = 0
   m.koHold = null
+  m.finish = null
+  m.roundAwarded = false
+  m.koTint = '#fff6df'
   m.zoomKick = 0
   m.panKick = 0
   m.kickX = 0
@@ -196,6 +214,7 @@ function startRound(m: Match) {
   const xs: [number, number] = [760, 1160]
   const faces: [1 | -1, 1 | -1] = [1, -1]
   for (let i = 0; i < 2; i++) resetBody(m.fighters[i], xs[i], faces[i], m.round === 1)
+  if (m.debugHp >= 1) m.fighters[1].hp = clamp(m.debugHp, 1, 99)
   const label = m.round <= 1 ? 'ROUND ONE — COMPILE' : m.round === 2 ? 'ROUND TWO — FINE-TUNE' : 'FINAL ROUND — DEPLOY'
   m.banner = label
   m.sub = BOOTH[(m.round + (m.seed % 5)) % BOOTH.length]
@@ -252,6 +271,8 @@ function resetBody(f: Fighter, x: number, facing: 1 | -1, first: boolean) {
   f.strikeLow = false
   f.damageTaken = 0
   f.recoil = 0
+  f.tumble = 0
+  f.tumbleV = 0
 }
 
 function makeFighter(id: string, player: 0 | 1, x: number): Fighter {
@@ -297,6 +318,8 @@ function makeFighter(id: string, player: 0 | 1, x: number): Fighter {
     strikeLow: false,
     damageTaken: 0,
     recoil: 0,
+    tumble: 0,
+    tumbleV: 0,
   }
 }
 
@@ -528,19 +551,31 @@ function integrate(f: Fighter) {
   }
 }
 
-function coast(f: Fighter) {
+function coast(f: Fighter, scale = 1) {
   f.anim++
+  const dt = scale
   if (!f.grounded) {
-    f.vy = Math.min(16, f.vy + GRAV)
-    f.y += f.vy
+    f.vy = Math.min(16, f.vy + GRAV * dt)
+    f.y += f.vy * dt
     if (f.y >= GROUND) {
-      f.y = GROUND
-      f.vy = 0
-      f.grounded = true
+      const bounce = f.state === 'ko' && f.vy > 5.5
+      if (bounce) {
+        f.y = GROUND
+        f.vy = -f.vy * 0.32
+        f.vx *= 0.65
+        f.tumbleV *= -0.55
+      } else {
+        f.y = GROUND
+        f.vy = 0
+        f.grounded = true
+        if (f.state === 'ko') f.tumbleV = 0
+      }
     }
   }
-  f.x += f.vx
-  f.vx *= 0.9
+  if (f.state === 'ko' && f.grounded) f.tumble += (-1.15 - f.tumble) * 0.14
+  else f.tumble += f.tumbleV * dt
+  f.x += f.vx * dt
+  f.vx *= Math.pow(0.9, dt)
   clampFighter(f)
 }
 
@@ -1358,13 +1393,10 @@ function resolveHit(m: Match, hit: Pending) {
   if (hit.root > 0) target.root = hit.root
 
   if (target.hp <= 0) {
-    target.state = 'ko'
-    target.hitstun = 60
-    target.grounded = false
-    target.vy = -7
-    target.vx = (Math.sign(target.x - hit.sourceX) || 1) * 3
-    m.koFlash = 16
-    burst(m, target.x, target.y - 60, '#e7ff52', 18)
+    launchKo(target, hit.sourceX)
+    m.koFlash = Math.max(m.koFlash, m.reduceMotion ? 8 : 22)
+    m.koTint = attacker.def.accent
+    burst(m, target.x, target.y - 60, attacker.def.accent, 18)
     noteAdv(m, attacker, target.hitstun)
     return
   }
@@ -1444,25 +1476,108 @@ function checkRound(m: Match) {
   }
 }
 
+function awardRound(m: Match, winner: 0 | 1) {
+  if (m.roundAwarded) return
+  m.roundAwarded = true
+  const champ = m.fighters[winner]
+  champ.wins += 1
+  if (champ.hp <= 0) champ.hp = 1
+  if (champ.wins >= 2) m.winner = winner
+}
+
+function launchKo(loser: Fighter, sourceX: number) {
+  const dir = Math.sign(loser.x - sourceX) || (loser.facing === 1 ? -1 : 1)
+  const flying = Math.abs(loser.vx) >= 14 && loser.vy <= -8
+  loser.state = 'ko'
+  loser.hitstun = 80
+  loser.crouching = false
+  loser.grounded = false
+  if (loser.y >= GROUND - 0.5) loser.y = GROUND - 1
+  loser.flash = Math.max(loser.flash, 14)
+  if (!flying) {
+    loser.vx = dir * 22
+    loser.vy = -13.2
+    loser.tumble = 0
+    loser.tumbleV = -dir * 0.42
+  }
+}
+
+function beginKoBeat(m: Match, winner: 0 | 1) {
+  if (m.finish?.kind === 'ko') return
+  const focus = (1 - winner) as 0 | 1
+  const champ = m.fighters[winner]
+  const loser = m.fighters[focus]
+  launchKo(loser, champ.x)
+  awardRound(m, winner)
+  const beat = m.reduceMotion ? 18 : 54
+  m.finish = {
+    kind: 'ko',
+    age: 0,
+    beat,
+    life: beat + 18,
+    focus,
+    scale: koTimeScale(0, m.reduceMotion),
+    color: champ.def.accent,
+    winner,
+  }
+  m.koFlash = Math.max(m.koFlash, m.reduceMotion ? 8 : 22)
+  m.koTint = champ.def.accent
+  m.shake = Math.max(m.shake, m.reduceMotion ? 0 : 16)
+  m.koHold = null
+  m.sfx.push('ko')
+  burst(m, loser.x, loser.y - 70, champ.def.accent, 12)
+}
+
+function tickKoBeat(m: Match) {
+  const fin = m.finish
+  if (!fin) return
+  fin.age++
+  fin.scale = koTimeScale(fin.age / fin.beat, m.reduceMotion)
+  for (const f of m.fighters) coast(f, fin.scale)
+  if (!m.reduceMotion && fin.age % 4 === 0) {
+    const loser = m.fighters[fin.focus]
+    m.ghosts.push({ x: loser.x, y: loser.y, facing: loser.facing, life: 12, color: fin.color })
+    if (m.ghosts.length > 24) m.ghosts.shift()
+  }
+  decayFx(m, false)
+  if (fin.age >= fin.beat) endRound(m, fin.winner)
+}
+
+function ageFinish(m: Match) {
+  if (!m.finish) return
+  m.finish.age++
+  if (m.finish.age >= m.finish.life) m.finish = null
+}
+
 function endRound(m: Match, winner: 0 | 1) {
   if (m.phase !== 'fight') return
   m.koHold = null
   const champ = m.fighters[winner]
   const loser = m.fighters[1 - winner]
-  champ.wins += 1
-  if (champ.hp <= 0) champ.hp = 1
+  awardRound(m, winner)
   champ.state = 'win'
   champ.vx = 0
   champ.hitstun = 0
+  champ.tumbleV = 0
   if (loser.hp <= 0) {
     loser.state = 'ko'
-    if (loser.grounded) {
+    if (loser.grounded && m.finish?.kind !== 'ko') {
       loser.grounded = false
       loser.vy = -6
     }
   } else {
     loser.state = 'hit'
     loser.hitstun = 20
+    m.finish = {
+      kind: 'time',
+      age: 0,
+      beat: 0,
+      life: 46,
+      focus: (1 - winner) as 0 | 1,
+      scale: 1,
+      color: '#f6f3ea',
+      winner,
+    }
   }
   m.phase = 'roundend'
   m.phaseTimer = champ.wins >= 2 ? 90 : 120
@@ -1476,7 +1591,7 @@ function endRound(m: Match, winner: 0 | 1) {
   m.callout = champ.wins >= 2 ? 'SYSTEM HALT' : m.banner
   m.calloutT = 80
   if (champ.wins >= 2) m.winner = winner
-  m.sfx.push(loser.hp <= 0 ? 'ko' : 'round')
+  if (m.finish?.kind !== 'ko') m.sfx.push(loser.hp <= 0 ? 'ko' : 'round')
   burst(m, champ.x, champ.y - 80, champ.def.accent, 16)
 }
 
@@ -1655,6 +1770,7 @@ function decayFx(m: Match, freeze: boolean) {
   const hold = freeze || m.hitstop > 0
   if (!freeze) m.frame++
   if (hold) return
+  const dt = m.finish?.kind === 'ko' && m.phase === 'fight' ? m.finish.scale : 1
   m.shake *= 0.9
   if (m.shake < 0.25) m.shake = 0
   m.zoomKick *= 0.84
@@ -1668,20 +1784,20 @@ function decayFx(m: Match, freeze: boolean) {
   if (m.lastAdvT > 0) m.lastAdvT--
   if (m.koFlash > 0) m.koFlash--
   if (m.bubble) {
-    m.bubble.life--
-    m.bubble.y -= 0.25
+    m.bubble.life -= dt
+    m.bubble.y -= 0.25 * dt
     if (m.bubble.life <= 0) m.bubble = null
   }
   for (const s of m.sparks) {
     if (s.kind !== 'flash' && s.kind !== 'ring' && s.kind !== 'slash') {
-      s.x += s.vx
-      s.y += s.vy
-      s.vy += s.kind === 'text' ? 0 : 0.18
+      s.x += s.vx * dt
+      s.y += s.vy * dt
+      s.vy += (s.kind === 'text' ? 0 : 0.18) * dt
     }
-    s.life--
+    s.life -= dt
   }
   m.sparks = m.sparks.filter((s) => s.life > 0)
-  for (const g of m.ghosts) g.life--
+  for (const g of m.ghosts) g.life -= dt
   m.ghosts = m.ghosts.filter((g) => g.life > 0)
   if (m.phase === 'fight' && m.frame % 45 === 0) {
     for (const f of m.fighters) if (f.hp > 0) f.meter = clamp(f.meter + 1, 0, 100)

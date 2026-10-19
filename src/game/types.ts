@@ -75,6 +75,8 @@ export interface Fighter {
   strikeLow: boolean
   damageTaken: number
   recoil: number
+  tumble: number
+  tumbleV: number
 }
 
 export interface Projectile {
@@ -170,6 +172,17 @@ export interface Bubble {
   life: number
 }
 
+export interface Finish {
+  kind: 'ko' | 'time'
+  age: number
+  beat: number
+  life: number
+  focus: 0 | 1
+  scale: number
+  color: string
+  winner: 0 | 1
+}
+
 export interface Match {
   fighters: [Fighter, Fighter]
   projectiles: Projectile[]
@@ -194,6 +207,7 @@ export interface Match {
   bubble: Bubble | null
   sfx: string[]
   koFlash: number
+  koTint: string
   winner: 0 | 1 | null
   fxCount: number
   zoomKick: number
@@ -207,6 +221,10 @@ export interface Match {
   lastAdv: number
   lastAdvT: number
   koHold: 0 | 1 | null
+  finish: Finish | null
+  roundAwarded: boolean
+  reduceMotion: boolean
+  debugHp: number
 }
 
 export function emptyPad(): Pad {

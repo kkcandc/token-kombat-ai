@@ -1,9 +1,12 @@
 import './style.css'
 import { ArcadeAudio } from './game/audio'
+import { GROUND } from './game/constants'
 import { createMatch, skipIntro, stepMatch } from './game/match'
 import { renderMatch, renderPortrait } from './game/render'
 import { ROSTER } from './game/roster'
 import { emptyPad, type Match, type Mode, type Pad } from './game/types'
+
+const BUILD = 'kofinish-2026-10-20'
 
 type Screen = 'title' | 'mode' | 'select' | 'fight'
 
@@ -43,6 +46,11 @@ const resultEl = document.getElementById('result')!
 const pauseEl = document.getElementById('pause-card')!
 const helpModal = document.getElementById('modal-help')!
 
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const params = new URLSearchParams(location.search)
+const seedQuery = Number(params.get('seed'))
+const hpQuery = Number(params.get('hp'))
+
 let screen: Screen = 'title'
 let mode: Mode = 'cpu'
 let cursor = 0
@@ -52,19 +60,29 @@ let match: Match | null = null
 let titleMatch = randomDemo()
 let titleHold = 0
 let paused = false
+let simHold = false
 let shownResult = false
 let dpr = 1
 let prev = emptyPad()
 let prev2 = emptyPad()
-
-const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
 let showFrames = false
+
+function rollSeed() {
+  if (Number.isFinite(seedQuery) && seedQuery > 0) return seedQuery >>> 0
+  return (Math.random() * 1e9) >>> 0
+}
+
+function tune(m: Match) {
+  m.reduceMotion = reduce
+  if (Number.isFinite(hpQuery) && hpQuery >= 1 && hpQuery < 100) m.debugHp = Math.round(hpQuery)
+  return m
+}
 
 function randomDemo() {
   const a = ROSTER[Math.floor(Math.random() * ROSTER.length)].id
   let b = ROSTER[Math.floor(Math.random() * ROSTER.length)].id
   if (b === a) b = ROSTER[(ROSTER.findIndex((f) => f.id === a) + 3) % ROSTER.length].id
-  return createMatch(a, b, 'demo', (Math.random() * 1e9) >>> 0)
+  return tune(createMatch(a, b, 'demo', rollSeed()))
 }
 
 function show(next: Screen) {
@@ -170,7 +188,7 @@ slotBtns[1].addEventListener('click', () => {
 })
 
 function bootFight(p1: string, p2: string) {
-  match = createMatch(p1, p2, mode, (Math.random() * 1e9) >>> 0)
+  match = tune(createMatch(p1, p2, mode, rollSeed()))
   paused = false
   shownResult = false
   pauseEl.classList.add('hidden')
@@ -410,7 +428,7 @@ function loop(now: number) {
           titleHold = 0
         }
       }
-    } else if (screen === 'fight' && match && !paused) {
+    } else if (screen === 'fight' && match && !paused && !simHold) {
       const input = pads()
       stepMatch(match, input)
       playSfx(match.sfx)
@@ -438,5 +456,32 @@ function loop(now: number) {
 
 paintRoster()
 markCards()
+window.__BUILD__ = BUILD
 window.__TOKEN = () => (screen === 'fight' ? match : titleMatch)
+window.__KO = {
+  setHp(i, hp) {
+    const live = screen === 'fight' ? match : null
+    if (!live || (i !== 0 && i !== 1)) return
+    live.fighters[i].hp = Math.max(0, Math.min(100, hp))
+  },
+  place(x0, x1) {
+    const live = screen === 'fight' ? match : null
+    if (!live) return
+    const xs = [x0, x1]
+    live.fighters.forEach((f, i) => {
+      f.x = xs[i]
+      f.y = GROUND
+      f.vx = 0
+      f.vy = 0
+      f.grounded = true
+      f.invuln = 0
+      f.hitstun = 0
+      f.facing = i === 0 ? 1 : -1
+      if (f.hp > 0 && f.state !== 'win') f.state = 'idle'
+    })
+  },
+  hold(on) {
+    simHold = on
+  },
+}
 requestAnimationFrame(loop)
